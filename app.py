@@ -1,6 +1,8 @@
 from pathlib import Path
 import traceback
 import uvicorn
+import nest_asyncio
+
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -9,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from backend import run_travel_agent
+nest_asyncio.apply()
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -48,7 +51,7 @@ async def home(request: Request):
 
 
 @app.post("/api/travel")
-async def travel_planner(request_data: TravelRequest):
+def travel_planner(request_data: TravelRequest):
     try:
         user_message = request_data.message.strip()
 
