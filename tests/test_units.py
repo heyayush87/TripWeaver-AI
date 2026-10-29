@@ -3,6 +3,7 @@
 import unittest
 
 from tripweaver.services.flights import parse_route, resolve_location_to_iata
+from tripweaver import utils
 from tripweaver.utils import cached, content_text, json_from_llm
 
 
@@ -50,12 +51,58 @@ class CacheTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
 
 
+class FakeStore:
+    def __init__(self):
+        self.data = {}
+
+    def get(self, key):
+        return self.data.get(key)
+
+    def set(self, key, value, ttl_seconds):
+        self.data[key] = value
+
+
+class SharedCacheTests(unittest.TestCase):
+    def tearDown(self):
+        utils.enable_shared_cache(None)
+
+    def test_value_survives_a_process_restart(self):
+        store = FakeStore()
+        utils.enable_shared_cache(store)
+        calls = []
+
+        def compute():
+            calls.append(1)
+            return {"ok": True}
+
+        key = ("unit-test", "shared")
+        cached(key, 60, compute)
+        utils._CACHE.clear()          # simulate a restart: memory is empty
+        self.assertEqual(cached(key, 60, compute), {"ok": True})
+        self.assertEqual(len(calls), 1)
+
+    def test_broken_store_does_not_break_requests(self):
+        class Broken:
+            def get(self, key):
+                raise RuntimeError("db down")
+
+            def set(self, key, value, ttl_seconds):
+                raise RuntimeError("db down")
+
+        utils.enable_shared_cache(Broken())
+        self.assertEqual(cached(("unit-test", "broken"), 60, lambda: 7), 7)
+
+
 class RouteTests(unittest.TestCase):
     def test_city_to_city(self):
         self.assertEqual(
             parse_route("Plan a trip from Dubai to San Francisco"),
             ("DXB", "SFO"),
         )
+
+    def test_city_before_comma_beats_country(self):
+        self.assertEqual(resolve_location_to_iata("Goa, India"), "GOI")
+        self.assertEqual(resolve_location_to_iata("Paris, France"), "CDG")
 
     def test_country_aliases_win_over_iata_codes(self):
         self.assertEqual(resolve_location_to_iata("USA"), "JFK")

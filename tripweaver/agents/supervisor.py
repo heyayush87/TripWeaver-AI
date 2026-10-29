@@ -1,5 +1,7 @@
 """Input guardrail and supervisor routing."""
 
+from concurrent.futures import ThreadPoolExecutor
+
 from langchain_core.messages import AIMessage
 from tripweaver.agents.state import AGENT_ORDER
 from tripweaver.agents.state import KNOWN_AGENTS
@@ -12,6 +14,45 @@ from tripweaver.utils import json_from_llm
 def supervisor_agent(state: TravelState):
     query = state["user_query"]
     llm_calls = 0
+
+    supervisor_prompt = f"""
+You are the supervisor of a multi-agent travel-planning system.
+Choose only the specialist agents needed for the request.
+
+Available agents:
+- flight_agent: flights, airports, airlines, routes, airfare, or booking advice
+- hotel_agent: hotels, accommodation, neighborhoods, or places to stay
+- weather_agent: weather, climate, season, forecast, or packing advice
+- budget_agent: cost, affordability, price limits, or budget feasibility
+- itinerary_agent: creates the integrated travel plan and must always be included
+
+Return strict JSON only using this schema:
+{{
+"selected_agents": ["flight_agent", "hotel_agent", "weather_agent", "budget_agent", "itinerary_agent"],
+"trip_constraints": {{
+    "destination": "",
+    "origin": "",
+    "duration": "",
+    "travel_date": "YYYY-MM-DD if the user gave a departure date, else empty",
+    "budget": "",
+    "travel_style": "",
+    "special_preferences": []
+}},
+"reasoning": ""
+}}
+
+User request:
+{query}
+"""
+
+    # The routing call does not depend on the guardrail verdict, so start it now
+    # and run both at the same time. If the guardrail blocks, its result is dropped.
+    planner = ThreadPoolExecutor(max_workers=1)
+    plan_future = planner.submit(
+        llm_text,
+        "You route work to travel specialist agents. Return strict JSON only.",
+        supervisor_prompt,
+    )
 
     guardrail_prompt = f"""
 Determine whether the following request belongs to travel planning or travel
@@ -49,9 +90,11 @@ User request:
         allowed = True
         guardrail_reason = "Guardrail validation fallback allowed the request."
 
+    planner.shutdown(wait=False)
+
     if not allowed:
         reason = guardrail_reason or (
-            "TripMate AI can only help with travel-planning requests. "
+            "TripWeaver AI can only help with travel-planning requests. "
             "Please ask about a destination, flight, hotel, weather, budget, "
             "or itinerary."
         )
@@ -66,41 +109,8 @@ User request:
             "llm_calls": llm_calls,
         }
 
-    supervisor_prompt = f"""
-You are the supervisor of a multi-agent travel-planning system.
-Choose only the specialist agents needed for the request.
-
-Available agents:
-- flight_agent: flights, airports, airlines, routes, airfare, or booking advice
-- hotel_agent: hotels, accommodation, neighborhoods, or places to stay
-- weather_agent: weather, climate, season, forecast, or packing advice
-- budget_agent: cost, affordability, price limits, or budget feasibility
-- itinerary_agent: creates the integrated travel plan and must always be included
-
-Return strict JSON only using this schema:
-{{
-"selected_agents": ["flight_agent", "hotel_agent", "weather_agent", "budget_agent", "itinerary_agent"],
-"trip_constraints": {{
-    "destination": "",
-    "origin": "",
-    "duration": "",
-    "travel_date": "YYYY-MM-DD if the user gave a departure date, else empty",
-    "budget": "",
-    "travel_style": "",
-    "special_preferences": []
-}},
-"reasoning": ""
-}}
-
-User request:
-{query}
-"""
-
     try:
-        supervisor_raw = llm_text(
-            "You route work to travel specialist agents. Return strict JSON only.",
-            supervisor_prompt,
-        )
+        supervisor_raw = plan_future.result()
         parsed = json_from_llm(supervisor_raw)
         requested_agents = parsed.get("selected_agents", [])
         selected_agents = [

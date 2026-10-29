@@ -1,15 +1,21 @@
 """HTTP routes. Heavy endpoints are plain `def` so FastAPI runs them in a
 worker thread instead of blocking the event loop."""
 
+import json
 import traceback
 from pathlib import Path
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from tripweaver.api.schemas import ApprovalRequest, TravelRequest
-from tripweaver.service import resume_travel_agent, run_travel_agent
+from tripweaver.service import (
+    resume_travel_agent,
+    run_travel_agent,
+    stream_resume_travel_agent,
+    stream_travel_agent,
+)
 
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
 templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
@@ -75,11 +81,52 @@ def approve_travel_plan(request_data: ApprovalRequest):
         return _error(500, str(exc))
 
 
+def _sse(events) -> StreamingResponse:
+    """Wrap an event iterator as Server-Sent Events (one JSON object per event)."""
+
+    def body():
+        for event in events:
+            yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+
+    return StreamingResponse(
+        body(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/api/travel/stream")
+def travel_planner_stream(request_data: TravelRequest):
+    user_message = request_data.message.strip()
+
+    if not user_message:
+        return _error(400, "Message cannot be empty.")
+
+    return _sse(stream_travel_agent(user_message, request_data.thread_id))
+
+
+@router.post("/api/travel/approve/stream")
+def approve_travel_plan_stream(request_data: ApprovalRequest):
+    if not request_data.approved and not request_data.feedback.strip():
+        return _error(
+            400,
+            "Please provide revision feedback when rejecting the draft.",
+        )
+
+    return _sse(
+        stream_resume_travel_agent(
+            request_data.thread_id,
+            request_data.approved,
+            request_data.feedback,
+        )
+    )
+
+
 @router.get("/health")
 async def health_check():
     return {
         "status": "ok",
-        "message": "TripMate AI API is running",
+        "message": "TripWeaver AI API is running",
         "features": [
             "supervisor_agent",
             "input_guardrail",

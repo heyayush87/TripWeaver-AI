@@ -46,12 +46,17 @@ def route_from_supervisor(state: TravelState):
     if parallel:
         return parallel
 
-    return "budget_agent" if "budget_agent" in selected else "itinerary_agent"
+    return _writers(selected)
 
 
-def route_after_parallel(state: TravelState) -> str:
-    """Join: the budget agent needs the parallel results, so it runs next."""
-    return "budget_agent" if "budget_agent" in _selected_agents(state) else "itinerary_agent"
+def _writers(selected: list[str]) -> list[str]:
+    """Budget analysis and the itinerary draft run at the same time."""
+    return [a for a in ("budget_agent", "itinerary_agent") if a in selected]
+
+
+def route_after_parallel(state: TravelState) -> list[str]:
+    """Join: once the data agents finish, run budget and itinerary together."""
+    return _writers(_selected_agents(state))
 
 
 graph = StateGraph(TravelState)
@@ -72,7 +77,8 @@ graph.add_conditional_edges("supervisor", route_from_supervisor, ROUTE_MAP)
 for parallel_agent in PARALLEL_AGENTS:
     graph.add_conditional_edges(parallel_agent, route_after_parallel, ROUTE_MAP)
 
-graph.add_edge("budget_agent", "itinerary_agent")
+# Budget and itinerary finish in the same step, so approval runs once.
+graph.add_edge("budget_agent", "human_approval")
 graph.add_edge("itinerary_agent", "human_approval")
 graph.add_edge("human_approval", "final_agent")
 graph.add_edge("final_agent", END)

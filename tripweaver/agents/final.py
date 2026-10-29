@@ -1,9 +1,11 @@
 """Final response agent."""
 
+from langchain_core.messages import AIMessage
 from langchain_core.messages import HumanMessage
 from langchain_core.messages import SystemMessage
 from tripweaver.agents.state import TravelState
 from tripweaver.llm import final_llm
+from tripweaver.streaming import get_emitter
 from tripweaver.utils import content_text
 
 
@@ -62,17 +64,27 @@ Important:
 - Incorporate the human feedback when revision was requested.
 """
 
-    response = final_llm.invoke(
+    emit = get_emitter()
+    pieces = []
+
+    # Stream the answer so the page can show it while it is being written.
+    for chunk in final_llm.stream(
         [
             SystemMessage(
                 content="You are a professional AI travel booking assistant."
             ),
             HumanMessage(content=final_prompt),
         ]
-    )
+    ):
+        piece = content_text(chunk.content)
+        if piece:
+            pieces.append(piece)
+            emit({"type": "final_delta", "text": piece})
+
+    final_text = "".join(pieces)
 
     return {
-        "final_response": content_text(response.content),
-        "messages": [response],
+        "final_response": final_text,
+        "messages": [AIMessage(content=final_text)],
         "llm_calls": 1,
     }

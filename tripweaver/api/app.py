@@ -12,7 +12,7 @@ WEB_DIR = Path(__file__).resolve().parents[1] / "web"
 
 def create_app() -> FastAPI:
     application = FastAPI(
-        title="TripMate AI",
+        title="TripWeaver AI",
         description=(
             "LangGraph Multi-Agent Travel Planner with Supervisor, Guardrails, "
             "Human-in-the-Loop, and FastAPI Frontend"

@@ -94,6 +94,7 @@ CITY_MAIN_AIRPORT = {
     "chennai": "MAA",
     "bangalore": "BLR",
     "bengaluru": "BLR",
+    "goa": "GOI",
     "tokyo": "NRT",
     "osaka": "KIX",
     "kyoto": "KIX",
@@ -219,12 +220,22 @@ def resolve_location_to_iata(location: str):
 
     raw_location = location.strip()
 
+    # "Goa, India": the city before the comma is more specific than the country.
+    if "," in raw_location:
+        city_code = resolve_location_to_iata(raw_location.split(",")[0])
+        if city_code:
+            return city_code
+
     # Country aliases such as "USA" or "UAE" are also valid IATA codes, so
     # check them first.
     if raw_location.lower() in COUNTRY_ALIASES:
         airport = get_best_airport_for_country(COUNTRY_ALIASES[raw_location.lower()])
         if airport:
             return airport
+
+    # Known city names beat IATA codes: "Goa" is a city, GOA is Genoa.
+    if raw_location.lower() in CITY_MAIN_AIRPORT:
+        return CITY_MAIN_AIRPORT[raw_location.lower()]
 
     # Direct IATA code
     if re.fullmatch(r"[A-Za-z]{3}", raw_location):
@@ -319,7 +330,7 @@ def parse_route(query: str):
     dep_iata, arr_iata
 
     Can return:
-    None, None  -> global live flights
+    None, None  -> no route found
     DAC, NRT    -> filtered route
     DAC, None   -> all flights from DAC
     None, NRT   -> all flights to NRT
@@ -327,21 +338,6 @@ def parse_route(query: str):
 
     q = query.strip()
     q_lower = q.lower()
-
-    # Global / all-country query
-    global_keywords = [
-        "all country",
-        "all countries",
-        "global flight",
-        "global flights",
-        "all flight",
-        "all flights",
-        "worldwide flight",
-        "worldwide flights",
-    ]
-
-    if any(keyword in q_lower for keyword in global_keywords):
-        return None, None
 
     # Direct IATA code route: DAC to NRT
     codes = re.findall(r"\b[A-Z]{3}\b", q)
@@ -514,7 +510,7 @@ def search_flights(query: str, limit: int = 10):
             "For actual fare prices, use a flight-pricing API such as Amadeus."
         )
 
-    route_info = "Global live flights"
+    route_info = "Live flights"
 
     if dep_iata and arr_iata:
         route_info = f"Live flights from {dep_iata} to {arr_iata}"
@@ -538,6 +534,21 @@ def _clock(iso_time: str | None) -> str:
     if not iso_time or len(iso_time) < 16:
         return "N/A"
     return iso_time[11:16]
+
+
+FLIGHT_CACHE_SECONDS = 6 * 3600   # the schedule changes slowly; also saves API quota
+
+
+def cached_flight_options(dep_iata: str, arr_iata: str) -> dict:
+    """get_flight_options with the shared cache. Failures are never cached."""
+    from tripweaver.utils import cached
+
+    return cached(
+        ("flights", dep_iata, arr_iata),
+        FLIGHT_CACHE_SECONDS,
+        lambda: get_flight_options(dep_iata, arr_iata),
+        store_if=lambda result: result["ok"],
+    )
 
 
 def get_flight_options(dep_iata: str, arr_iata: str, limit: int = 100) -> dict:

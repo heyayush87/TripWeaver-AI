@@ -8,19 +8,50 @@ import time
 
 _CACHE: dict[tuple, tuple[float, Any]] = {}
 
+# Optional second level that survives restarts and is shared by all workers.
+# db.py plugs a PostgreSQL store in; unit tests leave it off.
+_shared_store = None
+
+
+def enable_shared_cache(store) -> None:
+    global _shared_store
+    _shared_store = store
+
 
 def cached(key: tuple, ttl_seconds: int, compute, store_if=lambda value: True):
-    """Return a recent result for `key`, or compute and remember it."""
+    """Return a recent result for `key`, or compute and remember it.
+
+    Lookup order: this process's memory, the shared store, then `compute()`.
+    Shared-store errors are logged and ignored, so a cache problem never
+    breaks a request.
+    """
     now = time.monotonic()
     hit = _CACHE.get(key)
 
     if hit and now - hit[0] < ttl_seconds:
         return hit[1]
 
+    shared_key = ":".join(str(part) for part in key)
+
+    if _shared_store is not None:
+        try:
+            shared = _shared_store.get(shared_key)
+            if shared is not None:
+                _CACHE[key] = (now, shared)
+                return shared
+        except Exception as exc:
+            print(f"Shared cache read failed: {exc}")
+
     value = compute()
 
     if store_if(value):
         _CACHE[key] = (now, value)
+
+        if _shared_store is not None:
+            try:
+                _shared_store.set(shared_key, value, ttl_seconds)
+            except Exception as exc:
+                print(f"Shared cache write failed: {exc}")
 
     return value
 

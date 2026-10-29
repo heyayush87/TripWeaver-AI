@@ -6,11 +6,11 @@ from langchain_core.messages import SystemMessage
 from typing import Any
 from tripweaver.agents.state import TravelState
 from tripweaver.llm import fast_llm
+from tripweaver.streaming import get_emitter
 from tripweaver.services.flights import DEFAULT_ORIGIN_IATA
-from tripweaver.services.flights import get_flight_options
+from tripweaver.services.flights import cached_flight_options
 from tripweaver.services.flights import parse_route
 from tripweaver.services.flights import resolve_location_to_iata
-from tripweaver.utils import cached
 from tripweaver.utils import content_text
 
 
@@ -64,6 +64,7 @@ def _resolve_route(state: TravelState) -> tuple[str | None, str | None]:
 
 
 def flight_agent(state: TravelState):
+    emit = get_emitter()
     print("\nINSIDE FLIGHT AGENT\n")
     constraints = state.get("trip_constraints", {}) or {}
     travel_date = str(constraints.get("travel_date", "")).strip() or "not given"
@@ -78,14 +79,10 @@ def flight_agent(state: TravelState):
         dep = resolve_location_to_iata(DEFAULT_ORIGIN_IATA)
         assumed_origin = dep is not None
 
-    if dep and arr:
-        # Only successful lookups are cached, so a failure is retried next time.
-        lookup = cached(
-            ("flights", dep, arr),
-            900,
-            lambda: get_flight_options(dep, arr),
-            store_if=lambda result: result["ok"],
-        )
+    if dep and arr and dep == arr:
+        notice = "The departure and arrival airports are the same, so no flights are shown."
+    elif dep and arr:
+        lookup = cached_flight_options(dep, arr)
         options = lookup["options"][:10]
 
         if not lookup["ok"]:
@@ -106,6 +103,9 @@ def flight_agent(state: TravelState):
             "The departure or arrival city could not be identified. "
             "Mention both cities to see flight options."
         )
+
+    # Show the flight table right away; the guidance text below takes longer.
+    emit({"type": "flights", "options": options, "notice": notice})
 
     options_text = "\n".join(
         f"- {o['airline']} {o['flight_number']}: departs {o['departs']}, "

@@ -24,7 +24,7 @@ def weather_agent(state: TravelState):
 
         weather_data, forecast_data = cached(
             ("weather", city.lower()),
-            900,
+            1800,
             lambda: run_async(fetch_weather()),
         )
 

@@ -1,6 +1,24 @@
 let currentThreadId = localStorage.getItem("travel_thread_id") || null;
 let latestAnswerMarkdown = "";
 
+// Streaming state: the plan appears while it is being written.
+let draftParts = [];
+let draftTotal = 0;
+let draftBuffer = "";
+let finalBuffer = "";
+let renderTimer = null;
+
+const STAGE_MESSAGES = {
+    supervisor: "Request checked. Searching flights, hotels and weather...",
+    flight_agent: "Flights found.",
+    hotel_agent: "Hotels found.",
+    weather_agent: "Weather checked.",
+    budget_agent: "Budget reviewed.",
+    itinerary_agent: "Draft ready for your review.",
+    human_approval: "Writing the final plan...",
+    final_agent: "Final plan ready."
+};
+
 function setPrompt(text) {
     document.getElementById("userInput").value = text;
 }
@@ -35,6 +53,13 @@ function hideError() {
     errorBox.textContent = "";
 }
 
+function setProgress(message) {
+    const progress = document.getElementById("progressText");
+
+    progress.textContent = message || "";
+    progress.classList.toggle("hidden", !message);
+}
+
 function renderMarkdown(markdown) {
     const text = String(markdown || "");
 
@@ -44,6 +69,69 @@ function renderMarkdown(markdown) {
 
     const html = marked.parse(text);
     return typeof DOMPurify !== "undefined" ? DOMPurify.sanitize(html) : html;
+}
+
+function paintResult(markdown) {
+    const resultBox = document.getElementById("resultBox");
+    const html = renderMarkdown(markdown);
+
+    if (html !== null) {
+        resultBox.innerHTML = html;
+    } else {
+        resultBox.innerText = markdown;
+    }
+}
+
+// Re-rendering markdown on every token is wasteful, so paint at most every 120 ms.
+function schedulePaint(getMarkdown) {
+    if (renderTimer) {
+        return;
+    }
+
+    renderTimer = setTimeout(() => {
+        renderTimer = null;
+        latestAnswerMarkdown = getMarkdown();
+        paintResult(latestAnswerMarkdown);
+    }, 120);
+}
+
+function draftFromParts() {
+    const pieces = [];
+
+    for (let i = 0; i < draftTotal; i++) {
+        pieces.push(draftParts[i] || "*Writing the next days...*");
+    }
+
+    return pieces.join("\n\n");
+}
+
+function revealResultSection() {
+    const resultSection = document.getElementById("resultSection");
+
+    if (resultSection.classList.contains("hidden")) {
+        resultSection.classList.remove("hidden");
+        resultSection.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+}
+
+function resetForNewRun(keepFlights) {
+    draftParts = [];
+    draftTotal = 0;
+    draftBuffer = "";
+    finalBuffer = "";
+    latestAnswerMarkdown = "";
+
+    if (renderTimer) {
+        clearTimeout(renderTimer);
+        renderTimer = null;
+    }
+
+    document.getElementById("resultBox").replaceChildren();
+    document.getElementById("approvalPanel").classList.add("hidden");
+
+    if (!keepFlights) {
+        renderFlights([], "");
+    }
 }
 
 function showApproval(requiresApproval, message) {
@@ -93,32 +181,111 @@ function renderFlights(options, notice) {
     section.classList.remove("hidden");
 }
 
-function showResult(answer, threadId, requiresApproval = false, approvalMessage = "", flights = [], flightNotice = "") {
-    latestAnswerMarkdown = String(answer || "");
-
-    const resultSection = document.getElementById("resultSection");
-    const resultBox = document.getElementById("resultBox");
-    const threadInfo = document.getElementById("threadInfo");
-
-    const html = renderMarkdown(latestAnswerMarkdown);
-
-    if (html !== null) {
-        resultBox.innerHTML = html;
-    } else {
-        resultBox.innerText = latestAnswerMarkdown;
+// The final, authoritative render once the server says the run is finished.
+function showResult(data) {
+    if (renderTimer) {
+        clearTimeout(renderTimer);
+        renderTimer = null;
     }
 
-    renderFlights(flights, flightNotice);
-    showApproval(requiresApproval, approvalMessage);
+    latestAnswerMarkdown = String(data.answer || "");
+    paintResult(latestAnswerMarkdown);
 
-    threadInfo.textContent = `Thread ID: ${threadId}`;
+    renderFlights(data.flight_options, data.flight_notice);
+    showApproval(data.requires_approval, data.approval_request);
 
-    resultSection.classList.remove("hidden");
+    document.getElementById("threadInfo").textContent = `Thread ID: ${data.thread_id}`;
+    revealResultSection();
+}
 
-    resultSection.scrollIntoView({
-        behavior: "smooth",
-        block: "start"
+function handleEvent(event) {
+    switch (event.type) {
+        case "stage":
+            setProgress(STAGE_MESSAGES[event.node] || "");
+            break;
+
+        case "flights":
+            renderFlights(event.options, event.notice);
+            revealResultSection();
+            break;
+
+        case "draft_part":
+            draftTotal = event.total;
+            draftParts[event.index] = event.text;
+            revealResultSection();
+            setProgress("Writing your itinerary...");
+            schedulePaint(draftFromParts);
+            break;
+
+        case "draft_delta":
+            draftBuffer += event.text;
+            revealResultSection();
+            setProgress("Writing your itinerary...");
+            schedulePaint(() => draftBuffer);
+            break;
+
+        case "final_delta":
+            finalBuffer += event.text;
+            document.getElementById("approvalPanel").classList.add("hidden");
+            setProgress("Writing the final plan...");
+            schedulePaint(() => finalBuffer);
+            break;
+
+        case "done":
+            currentThreadId = event.result.thread_id;
+            localStorage.setItem("travel_thread_id", currentThreadId);
+            showResult(event.result);
+            break;
+
+        case "error":
+            throw new Error(event.error || "Something went wrong.");
+    }
+}
+
+// Read a Server-Sent Events response and call handleEvent for each message.
+async function streamRequest(url, body) {
+    const response = await fetch(url, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
     });
+
+    if (!response.ok) {
+        let message = "Something went wrong.";
+
+        try {
+            message = (await response.json()).error || message;
+        } catch (ignored) {
+            // keep the generic message
+        }
+
+        throw new Error(message);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+        const { value, done } = await reader.read();
+
+        if (done) {
+            break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+
+        const messages = buffer.split("\n\n");
+        buffer = messages.pop();
+
+        for (const message of messages) {
+            if (message.startsWith("data: ")) {
+                handleEvent(JSON.parse(message.slice(6)));
+            }
+        }
+    }
 }
 
 async function sendMessage() {
@@ -133,40 +300,18 @@ async function sendMessage() {
     }
 
     setLoading(true);
+    resetForNewRun(false);
+    setProgress("Checking your request...");
 
     try {
-        const response = await fetch("/api/travel", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                message: message,
-                thread_id: currentThreadId
-            })
+        await streamRequest("/api/travel/stream", {
+            message: message,
+            thread_id: currentThreadId
         });
-
-        const data = await response.json();
-
-        if (!response.ok || !data.success) {
-            throw new Error(data.error || "Something went wrong.");
-        }
-
-        currentThreadId = data.thread_id;
-        localStorage.setItem("travel_thread_id", currentThreadId);
-
-        showResult(
-            data.answer,
-            data.thread_id,
-            data.requires_approval,
-            data.approval_request,
-            data.flight_options,
-            data.flight_notice
-        );
-
     } catch (error) {
         showError(error.message);
     } finally {
+        setProgress("");
         setLoading(false);
     }
 }
@@ -184,37 +329,19 @@ async function submitApproval(approved) {
     const buttons = document.querySelectorAll("#approvalPanel button");
     buttons.forEach((button) => { button.disabled = true; });
 
+    resetForNewRun(true);
+    setProgress("Sending your decision...");
+
     try {
-        const response = await fetch("/api/travel/approve", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                thread_id: currentThreadId,
-                approved: approved,
-                feedback: feedback
-            })
+        await streamRequest("/api/travel/approve/stream", {
+            thread_id: currentThreadId,
+            approved: approved,
+            feedback: feedback
         });
-
-        const data = await response.json();
-
-        if (!response.ok || !data.success) {
-            throw new Error(data.error || "Something went wrong.");
-        }
-
-        showResult(
-            data.answer,
-            data.thread_id,
-            data.requires_approval,
-            data.approval_request,
-            data.flight_options,
-            data.flight_notice
-        );
-
     } catch (error) {
         showError(error.message);
     } finally {
+        setProgress("");
         buttons.forEach((button) => { button.disabled = false; });
     }
 }

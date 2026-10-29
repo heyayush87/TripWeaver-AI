@@ -22,13 +22,14 @@
 | | |
 |---|---|
 | 🧭 **Supervisor + guardrail** | Blocks non-travel requests and picks only the agents a request needs |
-| ⚡ **Parallel agents** | Flights, hotels and weather run at the same time |
+| ⚡ **Parallel agents** | Flights, hotels and weather run together; budget and itinerary run together; long itineraries are written in parallel day blocks |
 | 🛫 **Real flight options** | Airline, flight number and departure/arrival times from AviationStack |
 | 🏨 **Hotels** | Web search through Tavily (MCP) |
 | 🌦️ **Weather** | Custom OpenWeather MCP server (current + forecast) |
 | 💰 **Budget check** | Flags feasibility and money-saving options |
 | ✅ **Human-in-the-loop** | Approve the draft, or request changes with feedback |
 | 💾 **Persistent chats** | LangGraph checkpoints stored in PostgreSQL, one `thread_id` per chat |
+| 📡 **Streaming** | The flight table, the itinerary (block by block) and the final plan appear while they are written (Server-Sent Events) |
 | 📄 **Export** | Copy the plan or download it as a PDF |
 
 ---
@@ -45,15 +46,18 @@ flowchart LR
     F --> BU[Budget agent]
     H --> BU
     W --> BU
-    BU --> I[Itinerary draft]
-    I --> A{{Human approval}}
+    F --> I[Itinerary draft<br/>parallel day blocks]
+    H --> I
+    W --> I
+    BU --> A{{Human approval}}
+    I --> A
     A -- approve / request changes --> FN[Final plan]
     FN --> R([Response])
 ```
 
-1. The **supervisor** (Claude Haiku) checks that the request is about travel, extracts origin, destination, duration and budget, and chooses the agents.
+1. The **supervisor** (Claude Haiku) checks that the request is about travel and, at the same time, extracts origin, destination, duration and budget and chooses the agents.
 2. **Flight, hotel and weather** agents run in parallel (LangGraph fan-out).
-3. The **budget** agent reviews their results, then the **itinerary** agent (Claude Sonnet) writes a draft.
+3. The **budget** agent and the **itinerary** agent run in parallel. For trips longer than 4 days the itinerary is written map-reduce style: a quick outline, then blocks of days written at the same time by Claude Sonnet and joined.
 4. The graph **pauses** at `interrupt()` so you can approve the draft or send feedback.
 5. The **final** agent produces the formatted plan.
 
@@ -123,6 +127,8 @@ docker run --env-file .env -p 8000:8000 tripweaver
 | `GET` | `/` | Web interface |
 | `POST` | `/api/travel` | Start a plan (`message`, optional `thread_id`) |
 | `POST` | `/api/travel/approve` | Approve or request changes (`thread_id`, `approved`, `feedback`) |
+| `POST` | `/api/travel/stream` | Same as `/api/travel`, streamed as Server-Sent Events |
+| `POST` | `/api/travel/approve/stream` | Same as `/api/travel/approve`, streamed |
 | `GET` | `/health` | Health check |
 
 ---
@@ -143,13 +149,13 @@ The test set lives in [`evals/dataset.json`](evals/dataset.json) and the latest 
 
 | Check | What it measures | Score |
 |---|---|---|
-| Unit tests | Helpers, cache, route parsing | 8 / 8 pass |
+| Unit tests | Helpers, cache, route parsing | 11 / 11 pass |
 | Route resolution | "from X to Y" turned into the right airport codes | 6 / 6 |
 | Guardrail | 12 travel requests allowed, 8 unrelated or harmful ones blocked | 20 / 20 |
 | Routing | Right agents chosen (and wrong ones left out) | 5 / 5 |
 | Constraint extraction | Origin and destination read correctly | 5 / 5 |
 
-Mean supervisor time per request (guardrail + routing, two Haiku calls): **3.3 s**.
+Mean supervisor time per request (guardrail and routing run concurrently): **2.2 s**.
 
 ### Performance
 
@@ -158,9 +164,11 @@ Measured on one request, "Plan a 7 days Thailand trip from Bangladesh with budge
 | Version | Time to draft |
 |---|---|
 | Agents run one after another, Sonnet everywhere | ~137 s |
-| Parallel agents + Haiku for cheap steps + direct flight API | ~74 s |
+| Parallel data agents + Haiku for cheap steps + direct flight API | ~74 s |
+| + guardrail and routing in parallel, budget and itinerary in parallel | ~69 s |
+| + itinerary written in parallel day blocks (outline, then blocks) | ~41 s |
 
-The itinerary writer (~42 s) is now the largest single cost. Caching and the faster final-polish model were added afterwards and have not been timed yet.
+Each row is a single run, so expect some variation. With streaming, the flight table appears after about 6 s, the first draft text after about 26 s, and the final plan starts appearing about 9 s after you approve. Caching and the faster final-polish model were added along the way and have not been timed separately. The step after approval (final answer) still takes extra time.
 
 ### What this does not prove
 
@@ -203,11 +211,10 @@ scripts/                     run_evals.py, list_mcp_tools.py
 
 - Flight data needs an AviationStack plan that includes the live-flights endpoint. Date-specific schedules need a higher plan.
 - Hotel and fare information is a guide: always confirm before booking.
-- The in-memory cache is per process and resets on restart.
+- Flight, hotel and weather lookups are cached in PostgreSQL (flights and hotels 6 h, weather 30 min), so they survive restarts. Run `uv run python scripts/prewarm_cache.py` after a deploy to fill the cache for the example prompts; it makes real API calls, so do not run it often.
 
 ## 🛣️ Roadmap
 
 - [ ] Let users pick a flight and carry the choice into the plan
-- [ ] Stream the draft to the browser as it is written
 - [ ] Real fare data (for example Amadeus)
 - [ ] CI pipeline running tests and evals
