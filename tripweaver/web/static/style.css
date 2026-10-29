@@ -482,3 +482,49 @@ footer {
         padding: 20px;
     }
 }
+
+.approval-panel {
+    margin: 1rem 0;
+    padding: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+}
+
+.approval-panel textarea {
+    width: 100%;
+    min-height: 80px;
+    margin: 0.75rem 0;
+}
+
+.approval-actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+
+.flight-section {
+    margin-bottom: 1.5rem;
+}
+
+.flight-notice {
+    font-size: 0.85rem;
+    opacity: 0.8;
+}
+
+.flight-table-wrap {
+    overflow-x: auto;
+}
+
+.flight-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.flight-table th,
+.flight-table td {
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.3);
+}

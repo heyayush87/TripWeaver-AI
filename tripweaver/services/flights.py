@@ -13,7 +13,7 @@ os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
 API_KEY = os.getenv("AVIATION_API_KEY")
 
-DEFAULT_ORIGIN_IATA=os.getenv("DEFAULT_ORIGIN_IATA","IN")
+DEFAULT_ORIGIN_IATA=os.getenv("DEFAULT_ORIGIN_IATA","DEL")
 
 BASE_URL = "http://api.aviationstack.com/v1/flights"
 
@@ -218,6 +218,13 @@ def resolve_location_to_iata(location: str):
         return None
 
     raw_location = location.strip()
+
+    # Country aliases such as "USA" or "UAE" are also valid IATA codes, so
+    # check them first.
+    if raw_location.lower() in COUNTRY_ALIASES:
+        airport = get_best_airport_for_country(COUNTRY_ALIASES[raw_location.lower()])
+        if airport:
+            return airport
 
     # Direct IATA code
     if re.fullmatch(r"[A-Za-z]{3}", raw_location):
@@ -525,3 +532,79 @@ if __name__ == "__main__":
     print(search_flights("Plan a 7 days Japan trip from Bangladesh"))
     print("\n" + "=" * 80 + "\n")
     print(search_flights("all country flight info"))
+
+def _clock(iso_time: str | None) -> str:
+    """Return HH:MM from an AviationStack ISO timestamp (airport local time)."""
+    if not iso_time or len(iso_time) < 16:
+        return "N/A"
+    return iso_time[11:16]
+
+
+def get_flight_options(dep_iata: str, arr_iata: str, limit: int = 100) -> dict:
+    """
+    Fetch today's real flights between two airports.
+
+    The AviationStack plan used here only serves the current day, so the
+    result describes today's schedule, not a specific future date.
+    Codeshare duplicates are removed.
+    """
+    if not API_KEY:
+        return {"ok": False, "error": "AVIATION_API_KEY is missing.", "options": []}
+
+    try:
+        response = requests.get(
+            BASE_URL,
+            params={
+                "access_key": API_KEY,
+                "dep_iata": dep_iata,
+                "arr_iata": arr_iata,
+                "limit": limit,
+            },
+            timeout=20,
+        )
+        data = response.json()
+    except (requests.exceptions.RequestException, ValueError) as exc:
+        return {"ok": False, "error": str(exc), "options": []}
+
+    if "error" in data:
+        error = data["error"]
+        return {
+            "ok": False,
+            "error": f"{error.get('code', 'api_error')}: {error.get('message', '')}",
+            "options": [],
+        }
+
+    options = []
+    seen_slots = set()
+
+    # Operating carriers first, so codeshare listings are the ones dropped.
+    flights = sorted(
+        data.get("data") or [],
+        key=lambda f: f.get("flight", {}).get("codeshared") is not None,
+    )
+
+    for flight in flights:
+        dep = flight.get("departure") or {}
+        arr = flight.get("arrival") or {}
+        slot = (dep.get("scheduled"), arr.get("scheduled"))
+
+        if slot in seen_slots or not dep.get("scheduled"):
+            continue
+        seen_slots.add(slot)
+
+        options.append(
+            {
+                "airline": (flight.get("airline") or {}).get("name") or "Unknown",
+                "flight_number": (flight.get("flight") or {}).get("iata") or "N/A",
+                "date": dep["scheduled"][:10],
+                "departs": _clock(dep.get("scheduled")),
+                "arrives": _clock(arr.get("scheduled")),
+                "dep_terminal": dep.get("terminal") or "",
+                "status": flight.get("flight_status") or "unknown",
+                "dep_iata": dep_iata,
+                "arr_iata": arr_iata,
+            }
+        )
+
+    options.sort(key=lambda o: (o["date"], o["departs"]))
+    return {"ok": True, "error": "", "options": options}

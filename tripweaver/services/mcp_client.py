@@ -14,7 +14,7 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 # CHANGED: added the missing imports above (asyncio, shutil, sys, Path, Any,
 # ChatAnthropic) and removed the stray `from tkinter import NONE`.
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(BASE_DIR / ".env")
 
 os.environ["SSL_CERT_FILE"] = certifi.where()
@@ -32,8 +32,9 @@ AVIATION_STACK_API_KEY = (
 
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
-# CHANGED: the file in your project is custom_weather_mcp.py (no "_server").
-WEATHER_SERVER_PATH = BASE_DIR / "custom_weather_mcp.py"
+WEATHER_SERVER_PATH = (
+    Path(__file__).resolve().parents[1] / "mcp_servers" / "weather_server.py"
+)
 
 # CHANGED: UVX_COMMAND was used but never defined.
 UVX_COMMAND = shutil.which("uvx") or "uvx"

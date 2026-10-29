@@ -35,18 +35,81 @@ function hideError() {
     errorBox.textContent = "";
 }
 
-function showResult(answer, threadId) {
-    latestAnswerMarkdown = answer;
+function renderMarkdown(markdown) {
+    const text = String(markdown || "");
+
+    if (typeof marked === "undefined") {
+        return null;
+    }
+
+    const html = marked.parse(text);
+    return typeof DOMPurify !== "undefined" ? DOMPurify.sanitize(html) : html;
+}
+
+function showApproval(requiresApproval, message) {
+    const panel = document.getElementById("approvalPanel");
+
+    panel.classList.toggle("hidden", !requiresApproval);
+
+    if (requiresApproval) {
+        document.getElementById("approvalText").textContent =
+            message || "Please review the draft itinerary.";
+        document.getElementById("feedbackInput").value = "";
+    }
+}
+
+function renderFlights(options, notice) {
+    const section = document.getElementById("flightSection");
+    const rows = document.getElementById("flightRows");
+
+    rows.replaceChildren();
+    document.getElementById("flightNotice").textContent = notice || "";
+
+    if (!options || options.length === 0) {
+        section.classList.toggle("hidden", !notice);
+        return;
+    }
+
+    options.forEach((flight) => {
+        const row = document.createElement("tr");
+        const cells = [
+            flight.airline,
+            flight.flight_number,
+            `${flight.dep_iata} → ${flight.arr_iata}`,
+            flight.date,
+            flight.departs,
+            flight.arrives
+        ];
+
+        cells.forEach((value) => {
+            const cell = document.createElement("td");
+            cell.textContent = value;
+            row.appendChild(cell);
+        });
+
+        rows.appendChild(row);
+    });
+
+    section.classList.remove("hidden");
+}
+
+function showResult(answer, threadId, requiresApproval = false, approvalMessage = "", flights = [], flightNotice = "") {
+    latestAnswerMarkdown = String(answer || "");
 
     const resultSection = document.getElementById("resultSection");
     const resultBox = document.getElementById("resultBox");
     const threadInfo = document.getElementById("threadInfo");
 
-    if (typeof marked !== "undefined") {
-        resultBox.innerHTML = marked.parse(answer);
+    const html = renderMarkdown(latestAnswerMarkdown);
+
+    if (html !== null) {
+        resultBox.innerHTML = html;
     } else {
-        resultBox.innerText = answer;
+        resultBox.innerText = latestAnswerMarkdown;
     }
+
+    renderFlights(flights, flightNotice);
+    showApproval(requiresApproval, approvalMessage);
 
     threadInfo.textContent = `Thread ID: ${threadId}`;
 
@@ -92,12 +155,67 @@ async function sendMessage() {
         currentThreadId = data.thread_id;
         localStorage.setItem("travel_thread_id", currentThreadId);
 
-        showResult(data.answer, data.thread_id);
+        showResult(
+            data.answer,
+            data.thread_id,
+            data.requires_approval,
+            data.approval_request,
+            data.flight_options,
+            data.flight_notice
+        );
 
     } catch (error) {
         showError(error.message);
     } finally {
         setLoading(false);
+    }
+}
+
+async function submitApproval(approved) {
+    hideError();
+
+    const feedback = document.getElementById("feedbackInput").value.trim();
+
+    if (!approved && !feedback) {
+        showError("Please describe the changes you want before requesting a revision.");
+        return;
+    }
+
+    const buttons = document.querySelectorAll("#approvalPanel button");
+    buttons.forEach((button) => { button.disabled = true; });
+
+    try {
+        const response = await fetch("/api/travel/approve", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                thread_id: currentThreadId,
+                approved: approved,
+                feedback: feedback
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || "Something went wrong.");
+        }
+
+        showResult(
+            data.answer,
+            data.thread_id,
+            data.requires_approval,
+            data.approval_request,
+            data.flight_options,
+            data.flight_notice
+        );
+
+    } catch (error) {
+        showError(error.message);
+    } finally {
+        buttons.forEach((button) => { button.disabled = false; });
     }
 }
 

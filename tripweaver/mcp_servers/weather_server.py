@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(BASE_DIR / ".env")
 
 # CHANGED: log_level="WARNING" hides the "Processing request of type ..." lines.

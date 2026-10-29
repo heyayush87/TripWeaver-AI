@@ -3,5 +3,5 @@
 .git
 __pycache__/
 *.pyc
-test.py
-requirement.txt
+tests/
+scripts/

@@ -1,0 +1,141 @@
+"""Flight agent: real flight options plus guidance."""
+
+from langchain_core.messages import AIMessage
+from langchain_core.messages import HumanMessage
+from langchain_core.messages import SystemMessage
+from typing import Any
+from tripweaver.agents.state import TravelState
+from tripweaver.llm import fast_llm
+from tripweaver.services.flights import DEFAULT_ORIGIN_IATA
+from tripweaver.services.flights import get_flight_options
+from tripweaver.services.flights import parse_route
+from tripweaver.services.flights import resolve_location_to_iata
+from tripweaver.utils import cached
+from tripweaver.utils import content_text
+
+
+FLIGHT_AGENT_PROMPT = """
+You are a travel flight expert.
+
+User Query:
+{query}
+
+Route: {route}
+Requested travel date: {travel_date}
+
+Real flights found for this route (airport local times):
+{options_text}
+
+Notes:
+{notice}
+
+Write short markdown guidance with a bold heading and bullet points:
+- Which of the listed flights suit the traveller and why (only use the real
+  flights above; never invent flight numbers or times)
+- Typical flight duration
+- Estimated return airfare range, clearly marked as an estimate
+- Peak season pricing warning
+- Booking advice: prefer refundable or free-cancellation fares until any
+  required visa is approved; confirm visa rules with the embassy
+
+End with this line: "Fares, schedules and visa rules are indicative, so confirm
+before booking."
+"""
+
+
+FLIGHT_SCHEDULE_NOTICE = (
+    "Times shown are the airline's recent daily schedule in airport local time. "
+    "Live schedules for a specific future date are not available, so confirm "
+    "the flight on your travel date with the airline."
+)
+
+
+def _resolve_route(state: TravelState) -> tuple[str | None, str | None]:
+    constraints = state.get("trip_constraints", {}) or {}
+    dep = resolve_location_to_iata(str(constraints.get("origin", "")))
+    arr = resolve_location_to_iata(str(constraints.get("destination", "")))
+
+    if not (dep and arr):
+        parsed_dep, parsed_arr = parse_route(state["user_query"])
+        dep = dep or resolve_location_to_iata(str(parsed_dep or ""))
+        arr = arr or resolve_location_to_iata(str(parsed_arr or ""))
+
+    return dep, arr
+
+
+def flight_agent(state: TravelState):
+    print("\nINSIDE FLIGHT AGENT\n")
+    constraints = state.get("trip_constraints", {}) or {}
+    travel_date = str(constraints.get("travel_date", "")).strip() or "not given"
+
+    dep, arr = _resolve_route(state)
+    options: list[dict[str, Any]] = []
+    notice = ""
+    assumed_origin = False
+
+    # No departure city given: fall back to DEFAULT_ORIGIN_IATA.
+    if arr and not dep:
+        dep = resolve_location_to_iata(DEFAULT_ORIGIN_IATA)
+        assumed_origin = dep is not None
+
+    if dep and arr:
+        # Only successful lookups are cached, so a failure is retried next time.
+        lookup = cached(
+            ("flights", dep, arr),
+            900,
+            lambda: get_flight_options(dep, arr),
+            store_if=lambda result: result["ok"],
+        )
+        options = lookup["options"][:10]
+
+        if not lookup["ok"]:
+            print("Flight lookup failed:", lookup["error"])
+            notice = "Live flight data is unavailable right now."
+        elif not options:
+            notice = f"No flights were found for {dep} to {arr}."
+        else:
+            notice = FLIGHT_SCHEDULE_NOTICE
+
+        if assumed_origin:
+            notice = (
+                f"No departure city was given, so {dep} is assumed. "
+                "Mention where you are flying from to change it. " + notice
+            )
+    else:
+        notice = (
+            "The departure or arrival city could not be identified. "
+            "Mention both cities to see flight options."
+        )
+
+    options_text = "\n".join(
+        f"- {o['airline']} {o['flight_number']}: departs {o['departs']}, "
+        f"arrives {o['arrives']} ({o['date']})"
+        for o in options
+    ) or "None"
+
+    try:
+        response = fast_llm.invoke(
+            [
+                SystemMessage(content="You are an expert travel flight planner."),
+                HumanMessage(
+                    content=FLIGHT_AGENT_PROMPT.format(
+                        query=state["user_query"],
+                        route=f"{dep or '?'} to {arr or '?'}",
+                        travel_date=travel_date,
+                        options_text=options_text,
+                        notice=notice,
+                    )
+                ),
+            ]
+        )
+        flight_data = content_text(response.content)
+    except Exception as exc:
+        flight_data = f"Flight guidance unavailable: {exc}"
+
+    return {
+        "flight_results": flight_data,
+        "flight_options": options,
+        "flight_notice": notice,
+        "messages": [AIMessage(content="Flight recommendations generated")],
+        "llm_calls": 1,
+    }

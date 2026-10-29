@@ -67,7 +67,7 @@
                     Japan Trip
                 </button>
 
-                <button onclick="setPrompt('Plan a 5 days Dubai trip from Dhaka with flights, hotels and sightseeing.')">
+                <button onclick="setPrompt('Plan a 5 days Dubai trip from Delhi with flights, hotels and sightseeing.')">
                     Dubai Trip
                 </button>
 
@@ -101,8 +101,48 @@
                 </div>
             </div>
 
+            <div id="approvalPanel" class="approval-panel hidden">
+                <p id="approvalText">Please review the draft itinerary.</p>
+
+                <textarea
+                    id="feedbackInput"
+                    placeholder="Revision feedback (required if you want changes)..."
+                ></textarea>
+
+                <div class="approval-actions">
+                    <button id="approveBtn" onclick="submitApproval(true)">
+                        Approve
+                    </button>
+
+                    <button id="reviseBtn" class="revise-btn" onclick="submitApproval(false)">
+                        Request Changes
+                    </button>
+                </div>
+            </div>
+
             <div id="pdfContent" class="pdf-content">
                 <h1 class="pdf-title">AI Travel Plan</h1>
+
+                <div id="flightSection" class="flight-section hidden">
+                    <h2>Flight Options</h2>
+                    <p id="flightNotice" class="flight-notice"></p>
+                    <div class="flight-table-wrap">
+                        <table class="flight-table">
+                            <thead>
+                                <tr>
+                                    <th>Airline</th>
+                                    <th>Flight</th>
+                                    <th>Route</th>
+                                    <th>Date</th>
+                                    <th>Departs</th>
+                                    <th>Arrives</th>
+                                </tr>
+                            </thead>
+                            <tbody id="flightRows"></tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <div id="resultBox" class="result-box"></div>
             </div>
 
@@ -113,11 +153,14 @@
     </main>
 
     <footer>
-        Built with FastAPI, LangGraph, Groq, PostgreSQL, Tavily and AviationStack
+        Built with FastAPI, LangGraph, Claude, PostgreSQL, Tavily and AviationStack
     </footer>
 
     <!-- Markdown Renderer -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <!-- HTML Sanitizer -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
 
     <!-- PDF Download Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>

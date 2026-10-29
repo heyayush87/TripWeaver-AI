@@ -1,0 +1,24 @@
+{
+  "date": "2026-10-29",
+  "route_resolution": {
+    "passed": 6,
+    "total": 6,
+    "failures": []
+  },
+  "guardrail": {
+    "passed": 20,
+    "total": 20,
+    "failures": []
+  },
+  "routing": {
+    "passed": 5,
+    "total": 5,
+    "failures": []
+  },
+  "extraction": {
+    "passed": 5,
+    "total": 5,
+    "failures": []
+  },
+  "mean_supervisor_seconds": 3.34
+}
