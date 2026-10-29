@@ -6,6 +6,11 @@ from langchain_core.messages import SystemMessage
 from typing import Any
 from tripweaver.agents.state import TravelState
 from tripweaver.llm import fast_llm
+from tripweaver.limits import ANTHROPIC
+from tripweaver.limits import AVIATIONSTACK
+from tripweaver.limits import classify_text
+from tripweaver.limits import limit_update
+from tripweaver.limits import raise_if_limit
 from tripweaver.streaming import get_emitter
 from tripweaver.services.flights import DEFAULT_ORIGIN_IATA
 from tripweaver.services.flights import cached_flight_options
@@ -72,6 +77,7 @@ def flight_agent(state: TravelState):
     dep, arr = _resolve_route(state)
     options: list[dict[str, Any]] = []
     notice = ""
+    limit_fields: dict = {}
     assumed_origin = False
 
     # No departure city given: fall back to DEFAULT_ORIGIN_IATA.
@@ -88,6 +94,10 @@ def flight_agent(state: TravelState):
         if not lookup["ok"]:
             print("Flight lookup failed:", lookup["error"])
             notice = "Live flight data is unavailable right now."
+            limit = classify_text(AVIATIONSTACK, lookup["error"])
+            if limit:
+                notice = "The flight data API limit was reached, so no live flights are shown."
+                limit_fields = limit_update(limit, emit)
         elif not options:
             notice = f"No flights were found for {dep} to {arr}."
         else:
@@ -130,6 +140,7 @@ def flight_agent(state: TravelState):
         )
         flight_data = content_text(response.content)
     except Exception as exc:
+        raise_if_limit(exc, ANTHROPIC)  # a Claude limit stops the whole request
         flight_data = f"Flight guidance unavailable: {exc}"
 
     return {
@@ -138,4 +149,5 @@ def flight_agent(state: TravelState):
         "flight_notice": notice,
         "messages": [AIMessage(content="Flight recommendations generated")],
         "llm_calls": 1,
+        **limit_fields,
     }

@@ -14,6 +14,12 @@ from langchain_core.messages import AIMessage
 from langchain_core.messages import HumanMessage
 from langchain_core.messages import SystemMessage
 from tripweaver.agents.state import TravelState
+from tripweaver.context import BLOCK_SPEC
+from tripweaver.context import OUTLINE_SPEC
+from tripweaver.context import build_context
+from tripweaver.context import prepare
+from tripweaver.limits import ANTHROPIC
+from tripweaver.limits import raise_if_limit
 from tripweaver.llm import fast_llm
 from tripweaver.llm import llm
 from tripweaver.streaming import get_emitter
@@ -37,23 +43,9 @@ def _trip_days(state: TravelState) -> int | None:
     return None
 
 
-def _context(state: TravelState) -> str:
-    return f"""
-User Query:
-{state['user_query']}
-
-Trip Constraints:
-{state.get('trip_constraints', {})}
-
-Flight Results:
-{state.get('flight_results', '')}
-
-Hotel Results:
-{state.get('hotel_results', '')}
-
-Weather Results:
-{state.get('weather_results', '')}
-"""
+def _context(state: TravelState, spec=OUTLINE_SPEC) -> str:
+    """Only the facts a step needs (see tripweaver/context.py)."""
+    return "\n" + build_context(prepare(state), spec) + "\n"
 
 
 def _ask(model, prompt: str, on_delta=None) -> str:
@@ -121,7 +113,7 @@ Return markdown with:
             llm,
             f"""
 Write the detailed itinerary for Day {first} to Day {last} only.
-{_context(state)}
+{_context(state, BLOCK_SPEC)}
 Agreed outline for the whole trip:
 {outline}
 
@@ -160,6 +152,7 @@ def itinerary_agent(state: TravelState):
         try:
             itinerary, calls = _parallel_draft(state, days, emit)
         except Exception as exc:
+            raise_if_limit(exc, ANTHROPIC)
             print(f"Parallel itinerary failed, using one call: {exc}")
             itinerary, calls = _single_call(state, emit), 1
     else:

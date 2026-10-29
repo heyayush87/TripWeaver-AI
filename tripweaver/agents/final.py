@@ -4,6 +4,9 @@ from langchain_core.messages import AIMessage
 from langchain_core.messages import HumanMessage
 from langchain_core.messages import SystemMessage
 from tripweaver.agents.state import TravelState
+from tripweaver.context import FINAL_SPEC
+from tripweaver.context import build_context
+from tripweaver.context import prepare
 from tripweaver.llm import final_llm
 from tripweaver.streaming import get_emitter
 from tripweaver.utils import content_text
@@ -26,26 +29,7 @@ Generate the final travel response for the user.
 Human Review:
 {review_instruction}
 
-User Request:
-{state['user_query']}
-
-Supervisor Constraints:
-{state.get('trip_constraints', {})}
-
-Flights:
-{state.get('flight_results', '')}
-
-Hotels:
-{state.get('hotel_results', '')}
-
-Weather:
-{state.get('weather_results', '')}
-
-Budget Analysis:
-{state.get('budget_results', '')}
-
-Draft Itinerary:
-{state.get('itinerary', '')}
+{build_context(prepare(state), FINAL_SPEC)}
 
 Format the final answer beautifully using these sections:
 1. Trip Summary

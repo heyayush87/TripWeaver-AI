@@ -8,6 +8,9 @@ from collections.abc import Iterator
 from typing import Any
 from tripweaver.agents.graph import travel_graph
 from tripweaver.agents.state import empty_constraints
+from tripweaver.limits import ANTHROPIC
+from tripweaver.limits import classify_exception
+from tripweaver.limits import unique
 from tripweaver.utils import content_text
 
 
@@ -63,6 +66,7 @@ def _serialize_result(
         "approved": result.get("approved"),
         "human_feedback": result.get("human_feedback", ""),
         "llm_calls": result.get("llm_calls", 0),
+        "api_limits": unique(result.get("api_limits", [])),
     }
 
 
@@ -87,6 +91,7 @@ def _initial_state(user_input: str) -> dict[str, Any]:
         "human_feedback": "",
         "final_response": "",
         "llm_calls": 0,
+        "api_limits": [],
     }
 
 
@@ -148,12 +153,23 @@ def _stream_graph(graph_input: Any, thread_id: str) -> Iterator[dict[str, Any]]:
 
         yield {"type": "done", "result": _serialize_result(result, thread_id)}
 
-    except Exception:
+    except Exception as exc:
         traceback.print_exc()
-        yield {
-            "type": "error",
-            "error": "Something went wrong while planning. Please try again.",
-        }
+        limit = classify_exception(exc, ANTHROPIC)
+
+        if limit:
+            yield {
+                "type": "error",
+                "code": "limit_exceeded",
+                "api": limit.api,
+                "kind": limit.kind,
+                "error": limit.message,
+            }
+        else:
+            yield {
+                "type": "error",
+                "error": "Something went wrong while planning. Please try again.",
+            }
 
 
 def stream_travel_agent(

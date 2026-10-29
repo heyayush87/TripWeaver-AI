@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from tripweaver.api.schemas import ApprovalRequest, TravelRequest
+from tripweaver.limits import ANTHROPIC, classify_exception
 from tripweaver.service import (
     resume_travel_agent,
     run_travel_agent,
@@ -21,6 +22,25 @@ WEB_DIR = Path(__file__).resolve().parents[1] / "web"
 templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
 
 router = APIRouter()
+
+
+def _limit_or_error(exc: Exception) -> JSONResponse:
+    """429 with the API name when a quota or rate limit was hit, else 500."""
+    limit = classify_exception(exc, ANTHROPIC)
+
+    if limit:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "success": False,
+                "code": "limit_exceeded",
+                "api": limit.api,
+                "kind": limit.kind,
+                "error": limit.message,
+            },
+        )
+
+    return _error(500, "Something went wrong while planning. Please try again.")
 
 
 def _error(status_code: int, message: str) -> JSONResponse:
@@ -56,7 +76,7 @@ def travel_planner(request_data: TravelRequest):
     except Exception as exc:
         print("ERROR:", exc)
         traceback.print_exc()
-        return _error(500, str(exc))
+        return _limit_or_error(exc)
 
 
 @router.post("/api/travel/approve")
@@ -78,7 +98,7 @@ def approve_travel_plan(request_data: ApprovalRequest):
     except Exception as exc:
         print("APPROVAL ERROR:", exc)
         traceback.print_exc()
-        return _error(500, str(exc))
+        return _limit_or_error(exc)
 
 
 def _sse(events) -> StreamingResponse:

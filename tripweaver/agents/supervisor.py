@@ -7,6 +7,8 @@ from tripweaver.agents.state import AGENT_ORDER
 from tripweaver.agents.state import KNOWN_AGENTS
 from tripweaver.agents.state import TravelState
 from tripweaver.agents.state import empty_constraints
+from tripweaver.limits import ANTHROPIC
+from tripweaver.limits import raise_if_limit
 from tripweaver.llm import llm_text
 from tripweaver.utils import json_from_llm
 
@@ -86,6 +88,7 @@ User request:
         guardrail_reason = str(guardrail_result.get("reason", "")).strip()
         llm_calls += 1
     except Exception as exc:
+        raise_if_limit(exc, ANTHROPIC)  # never fail open on an exhausted quota
         print(f"Guardrail fallback used: {exc}")
         allowed = True
         guardrail_reason = "Guardrail validation fallback allowed the request."
@@ -130,6 +133,7 @@ User request:
         reasoning = str(parsed.get("reasoning", "")).strip()
         llm_calls += 1
     except Exception as exc:
+        raise_if_limit(exc, ANTHROPIC)
         print(f"Supervisor fallback used: {exc}")
         # Original workflow behavior is preserved as the fallback.
         selected_agents = AGENT_ORDER.copy()

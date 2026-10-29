@@ -164,6 +164,14 @@
 
     </main>
 
+    <dialog id="limitModal" class="limit-modal" aria-labelledby="limitTitle">
+        <h2 id="limitTitle">Token limit exceeded</h2>
+        <p id="limitIntro"></p>
+        <ul id="limitList"></ul>
+        <p class="limit-help">Add credits or wait for the quota to reset, then try again.</p>
+        <button type="button" onclick="closeLimitModal()">Close</button>
+    </dialog>
+
     <footer>
         Built with FastAPI, LangGraph, Claude, PostgreSQL, Tavily and AviationStack
     </footer>

@@ -8,6 +8,10 @@ let draftBuffer = "";
 let finalBuffer = "";
 let renderTimer = null;
 
+// APIs that hit a limit during this run, and the ones already shown in the popup.
+let limitNotices = [];
+let shownLimitApis = new Set();
+
 const STAGE_MESSAGES = {
     supervisor: "Request checked. Searching flights, hotels and weather...",
     flight_agent: "Flights found.",
@@ -51,6 +55,53 @@ function hideError() {
 
     errorBox.classList.add("hidden");
     errorBox.textContent = "";
+}
+
+function showLimitModal(items, fatal) {
+    const fresh = items.filter((item) => !shownLimitApis.has(item.api));
+
+    if (fresh.length === 0) {
+        return;
+    }
+
+    fresh.forEach((item) => shownLimitApis.add(item.api));
+
+    document.getElementById("limitIntro").textContent = fatal
+        ? "Your request could not be completed."
+        : "The plan was completed with general suggestions for the services below.";
+
+    const list = document.getElementById("limitList");
+    list.replaceChildren();
+
+    fresh.forEach((item) => {
+        const entry = document.createElement("li");
+        const name = document.createElement("strong");
+
+        name.textContent = item.api;
+        entry.appendChild(name);
+        entry.appendChild(document.createTextNode(`: ${item.message}`));
+        list.appendChild(entry);
+    });
+
+    const modal = document.getElementById("limitModal");
+
+    if (typeof modal.showModal === "function") {
+        if (!modal.open) {
+            modal.showModal();
+        }
+    } else {
+        modal.setAttribute("open", "");
+    }
+}
+
+function closeLimitModal() {
+    const modal = document.getElementById("limitModal");
+
+    if (typeof modal.close === "function") {
+        modal.close();
+    } else {
+        modal.removeAttribute("open");
+    }
 }
 
 function setProgress(message) {
@@ -231,13 +282,24 @@ function handleEvent(event) {
             schedulePaint(() => finalBuffer);
             break;
 
+        case "limit":
+            limitNotices.push({ api: event.api, message: event.message });
+            break;
+
         case "done":
             currentThreadId = event.result.thread_id;
             localStorage.setItem("travel_thread_id", currentThreadId);
             showResult(event.result);
+            showLimitModal(
+                (event.result.api_limits || []).concat(limitNotices),
+                false
+            );
             break;
 
         case "error":
+            if (event.code === "limit_exceeded") {
+                showLimitModal([{ api: event.api, message: event.error }], true);
+            }
             throw new Error(event.error || "Something went wrong.");
     }
 }
@@ -300,6 +362,8 @@ async function sendMessage() {
     }
 
     setLoading(true);
+    limitNotices = [];
+    shownLimitApis = new Set();
     resetForNewRun(false);
     setProgress("Checking your request...");
 

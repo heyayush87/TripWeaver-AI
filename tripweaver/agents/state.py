@@ -36,6 +36,9 @@ class TravelState(TypedDict, total=False):
     # Parallel agents each add their own calls, so the counts are summed.
     llm_calls: Annotated[int, operator.add]
 
+    # APIs that hit a quota or rate limit during this run (shown as a popup).
+    api_limits: Annotated[list[dict[str, str]], operator.add]
+
 
 KNOWN_AGENTS = {
     "flight_agent",

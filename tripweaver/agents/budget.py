@@ -4,6 +4,9 @@ from langchain_core.messages import AIMessage
 from langchain_core.messages import HumanMessage
 from langchain_core.messages import SystemMessage
 from tripweaver.agents.state import TravelState
+from tripweaver.context import BUDGET_SPEC
+from tripweaver.context import build_context
+from tripweaver.context import prepare
 from tripweaver.llm import fast_llm
 from tripweaver.utils import content_text
 
@@ -12,20 +15,7 @@ def budget_agent(state: TravelState):
     prompt = f"""
 Analyze whether this trip is realistic for the user's budget.
 
-User Query:
-{state['user_query']}
-
-Trip Constraints:
-{state.get('trip_constraints', {})}
-
-Flight Results:
-{state.get('flight_results', '')}
-
-Hotel Results:
-{state.get('hotel_results', '')}
-
-Weather Results:
-{state.get('weather_results', '')}
+{build_context(prepare(state), BUDGET_SPEC)}
 
 Return:
 1. Estimated cost categories

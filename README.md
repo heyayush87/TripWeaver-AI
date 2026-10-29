@@ -30,6 +30,8 @@
 | ✅ **Human-in-the-loop** | Approve the draft, or request changes with feedback |
 | 💾 **Persistent chats** | LangGraph checkpoints stored in PostgreSQL, one `thread_id` per chat |
 | 📡 **Streaming** | The flight table, the itinerary (block by block) and the final plan appear while they are written (Server-Sent Events) |
+| 🚦 **Limit fallback** | If an API runs out of quota the page shows a "Token limit exceeded" popup naming the API. Claude limits stop the request; search, flight and weather limits still give a plan with general suggestions |
+| ✂️ **Context stripping** | Each model call receives only the data it needs (top hotel results, no URLs, per-step length limits), about half the prompt tokens |
 | 📄 **Export** | Copy the plan or download it as a PDF |
 
 ---
@@ -149,13 +151,13 @@ The test set lives in [`evals/dataset.json`](evals/dataset.json) and the latest 
 
 | Check | What it measures | Score |
 |---|---|---|
-| Unit tests | Helpers, cache, route parsing | 11 / 11 pass |
+| Unit tests | Helpers, cache, route parsing, limit detection, context stripping | 28 / 28 pass |
 | Route resolution | "from X to Y" turned into the right airport codes | 6 / 6 |
 | Guardrail | 12 travel requests allowed, 8 unrelated or harmful ones blocked | 20 / 20 |
 | Routing | Right agents chosen (and wrong ones left out) | 5 / 5 |
 | Constraint extraction | Origin and destination read correctly | 5 / 5 |
 
-Mean supervisor time per request (guardrail and routing run concurrently): **2.2 s**.
+Mean supervisor time per request (guardrail and routing run concurrently, thinking off): **1.6 s**.
 
 ### Performance
 
@@ -167,6 +169,7 @@ Measured on one request, "Plan a 7 days Thailand trip from Bangladesh with budge
 | Parallel data agents + Haiku for cheap steps + direct flight API | ~74 s |
 | + guardrail and routing in parallel, budget and itinerary in parallel | ~69 s |
 | + itinerary written in parallel day blocks (outline, then blocks) | ~41 s |
+| + Haiku thinking off, context stripping | ~30 s |
 
 Each row is a single run, so expect some variation. With streaming, the flight table appears after about 6 s, the first draft text after about 26 s, and the final plan starts appearing about 9 s after you approve. Caching and the faster final-polish model were added along the way and have not been timed separately. The step after approval (final answer) still takes extra time.
 
@@ -189,6 +192,9 @@ Every change made for speed or robustness, in the order it was done. Times are s
 | 11 | Connection pool with health check instead of one shared connection | A single connection is a bottleneck and breaks when it drops | More robust |
 | 12 | Endpoints are plain `def` so FastAPI runs them in worker threads; removed `nest_asyncio` | Blocking graph calls must not freeze the event loop | One slow plan no longer blocks others |
 | 13 | Fallbacks when hotel or weather lookups fail | A search outage or rate limit must not fail the whole plan | Plan still completes with general suggestions |
+| 14 | Haiku thinking switched off (`thinking={"type": "disabled"}`) | Adaptive thinking is on by default: hundreds of hidden output tokens per call, and it used up `max_tokens` so the budget answer came back empty | Budget answer works again (0 to ~4.7k characters); one call 9.3 s to 3.6 s in a small test; supervisor 2.2 s to 1.6 s |
+| 15 | Context stripping (`tripweaver/context.py`): per-step field lists and length limits, top 3 search results without URLs, junk snippets and empty sections dropped | Send each call only what it needs | Prompt input about 16.6k to 8.0k tokens (character estimate); one real draft run 19.8k to 13.0k input and 12.2k to 9.1k output tokens |
+| 16 | Limit fallback: detect quota and rate-limit failures per API and show a popup naming the API | A limit must be visible, and must not fail the whole plan when the API only adds data | Claude limit: clear message, request stops. Tavily, AviationStack or OpenWeather limit: plan still completes |
 
 ### Alternatives considered
 
@@ -200,7 +206,7 @@ Every change made for speed or robustness, in the order it was done. Times are s
 | Postgres cache | Redis | No new service and it survives restarts; Redis is the next step at higher traffic (a hit costs about 0.5 s against sub-millisecond) |
 | Map-reduce itinerary | Shorter prompt or a smaller model | Cutting output loses detail; a smaller model risks quality (not A/B tested yet) |
 | Streaming over SSE | WebSocket or polling | SSE is one-way and simple for text; polling wastes requests |
-| Trimming context | Not done yet | Prompts are small (about 1.5k to 3k tokens) and output length dominates time, so it would mainly save cost. Next step: log tokens per node, then trim repeated context and measure |
+| Trimming context | Leave prompts as they are | Done. The prompts were small, so the gain is mostly cost (about half the input tokens). Quality was checked by reading a plan before and after, because the evals do not score itineraries |
 
 Not changed on purpose: the weather MCP server (about 6 s cold, not on the critical path and a useful showcase) and merging the two supervisor calls (they already run together).
 
