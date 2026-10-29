@@ -170,6 +170,40 @@ Measured on one request, "Plan a 7 days Thailand trip from Bangladesh with budge
 
 Each row is a single run, so expect some variation. With streaming, the flight table appears after about 6 s, the first draft text after about 26 s, and the final plan starts appearing about 9 s after you approve. Caching and the faster final-polish model were added along the way and have not been timed separately. The step after approval (final answer) still takes extra time.
 
+### Optimization log
+
+Every change made for speed or robustness, in the order it was done. Times are single runs on one request.
+
+| # | Change | Why | Effect |
+|---|---|---|---|
+| 1 | Profile each graph node with `stream_mode="updates"` | Find the real bottleneck instead of guessing | Baseline ~137 s to draft |
+| 2 | Flight, hotel and weather agents run in parallel (list returned from the routing function, `Annotated[int, operator.add]` on `llm_calls`) | They do not depend on each other | ~137 s to ~100 s |
+| 3 | Claude Haiku for the supervisor, flight guidance, budget and final formatting; Sonnet only for the itinerary | Short tasks do not need the larger model | ~74 s |
+| 4 | Flights through a direct HTTP call instead of a stdio MCP subprocess; removed the failing airport and airline list calls | Subprocess start-up cost and blocked endpoints | Flight step no longer fails or waits on tools |
+| 5 | Current weather and forecast fetched together with `asyncio.gather` | Two sequential MCP sessions | Faster weather step |
+| 6 | Guardrail and routing calls run at the same time | Routing does not need the guardrail verdict | Supervisor ~7 s to ~5 s (evals: 3.3 s to 2.2 s) |
+| 7 | Budget and itinerary run in parallel | The itinerary no longer waits for the budget text | ~69 s |
+| 8 | Itinerary written as map-reduce: Haiku outline, then up to 4 blocks of days written in parallel | One long Sonnet call is limited by output tokens | Itinerary ~47 s to ~23 s; ~41 s to draft |
+| 9 | Streaming over Server-Sent Events (flight table, draft blocks, final text) | Show results while they are written | Flight table at ~6 s, first draft text at ~26 s |
+| 10 | Shared cache in PostgreSQL with an in-memory layer in front (flights and hotels 6 h, weather 30 min) | Survive restarts, share between workers, save API quota | Flight lookup 3.7 s to 0.5 s on a hit |
+| 11 | Connection pool with health check instead of one shared connection | A single connection is a bottleneck and breaks when it drops | More robust |
+| 12 | Endpoints are plain `def` so FastAPI runs them in worker threads; removed `nest_asyncio` | Blocking graph calls must not freeze the event loop | One slow plan no longer blocks others |
+| 13 | Fallbacks when hotel or weather lookups fail | A search outage or rate limit must not fail the whole plan | Plan still completes with general suggestions |
+
+### Alternatives considered
+
+| Choice | Alternative | Why not |
+|---|---|---|
+| Parallel agents in LangGraph | Keep sequential | Same cost, much longer wall-clock time |
+| Haiku for short steps | One large model everywhere | Slower and dearer; quality on short tasks is the same (checked by the evals) |
+| Direct flight HTTP call | Persistent MCP session | More moving parts for one fixed call; MCP is kept where reuse matters (weather, search) |
+| Postgres cache | Redis | No new service and it survives restarts; Redis is the next step at higher traffic (a hit costs about 0.5 s against sub-millisecond) |
+| Map-reduce itinerary | Shorter prompt or a smaller model | Cutting output loses detail; a smaller model risks quality (not A/B tested yet) |
+| Streaming over SSE | WebSocket or polling | SSE is one-way and simple for text; polling wastes requests |
+| Trimming context | Not done yet | Prompts are small (about 1.5k to 3k tokens) and output length dominates time, so it would mainly save cost. Next step: log tokens per node, then trim repeated context and measure |
+
+Not changed on purpose: the weather MCP server (about 6 s cold, not on the critical path and a useful showcase) and merging the two supervisor calls (they already run together).
+
 ### What this does not prove
 
 - The test set is small (36 cases), so a perfect score means "no failures found here", not "always correct". Add a case for every bug you find.
