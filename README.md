@@ -30,6 +30,7 @@
 | ✅ **Human-in-the-loop** | Approve the draft, or request changes with feedback |
 | 💾 **Persistent chats** | LangGraph checkpoints stored in PostgreSQL, one `thread_id` per chat |
 | 📡 **Streaming** | The flight table, the itinerary (block by block) and the final plan appear while they are written (Server-Sent Events) |
+| 🛟 **Graceful fallbacks** | Every external step degrades instead of failing the request: hotels, weather and flights fall back to general suggestions, budget to a short note, the final answer to the approved draft, and parallel itinerary drafting to a single call. Claude calls retry up to 4 times on overload or timeouts |
 | 🚦 **Limit fallback** | If an API runs out of quota the page shows a "Token limit exceeded" popup naming the API. Claude limits stop the request; search, flight and weather limits still give a plan with general suggestions |
 | ✂️ **Context stripping** | Each model call receives only the data it needs (top hotel results, no URLs, per-step length limits), about half the prompt tokens |
 | 📄 **Export** | Copy the plan or download it as a PDF |
@@ -151,7 +152,7 @@ The test set lives in [`evals/dataset.json`](evals/dataset.json) and the latest 
 
 | Check | What it measures | Score |
 |---|---|---|
-| Unit tests | Helpers, cache, route parsing, limit detection, context stripping | 28 / 28 pass |
+| Unit tests | Helpers, cache, route parsing, limit detection, context stripping | 31 / 31 pass |
 | Route resolution | "from X to Y" turned into the right airport codes | 6 / 6 |
 | Guardrail | 12 travel requests allowed, 8 unrelated or harmful ones blocked | 20 / 20 |
 | Routing | Right agents chosen (and wrong ones left out) | 5 / 5 |
@@ -195,6 +196,7 @@ Every change made for speed or robustness, in the order it was done. Times are s
 | 14 | Haiku thinking switched off (`thinking={"type": "disabled"}`) | Adaptive thinking is on by default: hundreds of hidden output tokens per call, and it used up `max_tokens` so the budget answer came back empty | Budget answer works again (0 to ~4.7k characters); one call 9.3 s to 3.6 s in a small test; supervisor 2.2 s to 1.6 s |
 | 15 | Context stripping (`tripweaver/context.py`): per-step field lists and length limits, top 3 search results without URLs, junk snippets and empty sections dropped | Send each call only what it needs | Prompt input about 16.6k to 8.0k tokens (character estimate); one real draft run 19.8k to 13.0k input and 12.2k to 9.1k output tokens |
 | 16 | Limit fallback: detect quota and rate-limit failures per API and show a popup naming the API | A limit must be visible, and must not fail the whole plan when the API only adds data | Claude limit: clear message, request stops. Tavily, AviationStack or OpenWeather limit: plan still completes |
+| 17 | Graceful fallbacks for the Claude steps (budget note, final answer falls back to the approved draft) and `max_retries=4` on all models | A transient Claude failure (overload, timeout, 5xx) should not throw away a nearly finished plan; quota errors still stop the run | Plan completes through partial failures; 3 new unit tests |
 
 ### Alternatives considered
 
