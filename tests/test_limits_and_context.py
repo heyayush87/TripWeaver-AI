@@ -94,6 +94,40 @@ class AgentFallbackTests(unittest.TestCase):
         self.assertNotIn("api_limits", out)
 
 
+class ClaudeFailureFallbackTests(unittest.TestCase):
+    def test_budget_failure_gives_a_note_not_a_crash(self):
+        from tripweaver.agents.budget import budget_agent
+
+        with mock.patch(
+            "tripweaver.agents.budget.fast_llm",
+            mock.Mock(invoke=mock.Mock(side_effect=RuntimeError("overloaded"))),
+        ):
+            out = budget_agent({"user_query": "trip"})
+
+        self.assertIn("could not be generated", out["budget_results"])
+
+    def test_budget_quota_error_still_stops_the_run(self):
+        from tripweaver.agents.budget import budget_agent
+
+        with mock.patch(
+            "tripweaver.agents.budget.fast_llm",
+            mock.Mock(invoke=mock.Mock(side_effect=RuntimeError("429 too many requests"))),
+        ):
+            with self.assertRaises(ApiLimitError):
+                budget_agent({"user_query": "trip"})
+
+    def test_final_failure_falls_back_to_the_approved_draft(self):
+        from tripweaver.agents.final import final_agent
+
+        with mock.patch(
+            "tripweaver.agents.final.final_llm",
+            mock.Mock(stream=mock.Mock(side_effect=RuntimeError("boom"))),
+        ):
+            out = final_agent({"approved": True, "itinerary": "Day 1: Paris"})
+
+        self.assertEqual(out["final_response"], "Day 1: Paris")
+
+
 class ContextTests(unittest.TestCase):
     def test_clip_cuts_at_a_word_and_marks_it(self):
         self.assertEqual(clip("alpha beta gamma", 12), "alpha beta ...")

@@ -7,7 +7,9 @@ from tripweaver.usage import USAGE_LOGGER
 from tripweaver.utils import content_text
 
 
-llm = ChatAnthropic(model="claude-sonnet-5-5", callbacks=[USAGE_LOGGER])
+llm = ChatAnthropic(
+    model="claude-sonnet-5-5", max_retries=4, callbacks=[USAGE_LOGGER]
+)
 
 
 # Smaller, faster model for routing, flight guidance and budget analysis.
@@ -18,6 +20,7 @@ fast_llm = ChatAnthropic(
     model="claude-haiku-5-5",
     max_tokens=2000,
     thinking={"type": "disabled"},
+    max_retries=4,
     callbacks=[USAGE_LOGGER],
 )
 
@@ -27,6 +30,7 @@ final_llm = ChatAnthropic(
     model="claude-haiku-5-5",
     max_tokens=8000,
     thinking={"type": "disabled"},
+    max_retries=4,
     callbacks=[USAGE_LOGGER],
 )
 

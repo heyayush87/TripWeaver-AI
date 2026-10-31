@@ -7,6 +7,8 @@ from tripweaver.agents.state import TravelState
 from tripweaver.context import FINAL_SPEC
 from tripweaver.context import build_context
 from tripweaver.context import prepare
+from tripweaver.limits import ANTHROPIC
+from tripweaver.limits import raise_if_limit
 from tripweaver.llm import final_llm
 from tripweaver.streaming import get_emitter
 from tripweaver.utils import content_text
@@ -52,20 +54,29 @@ Important:
     pieces = []
 
     # Stream the answer so the page can show it while it is being written.
-    for chunk in final_llm.stream(
-        [
-            SystemMessage(
-                content="You are a professional AI travel booking assistant."
-            ),
-            HumanMessage(content=final_prompt),
-        ]
-    ):
-        piece = content_text(chunk.content)
-        if piece:
-            pieces.append(piece)
-            emit({"type": "final_delta", "text": piece})
+    try:
+        for chunk in final_llm.stream(
+            [
+                SystemMessage(
+                    content="You are a professional AI travel booking assistant."
+                ),
+                HumanMessage(content=final_prompt),
+            ]
+        ):
+            piece = content_text(chunk.content)
+            if piece:
+                pieces.append(piece)
+                emit({"type": "final_delta", "text": piece})
+    except Exception as exc:
+        raise_if_limit(exc, ANTHROPIC)
+        pieces = []
 
     final_text = "".join(pieces)
+
+    if not final_text.strip():
+        # The polishing step failed: the approved draft is still a complete plan.
+        final_text = state.get("itinerary", "") or "The final plan could not be written. Please try again."
+        emit({"type": "final_delta", "text": final_text})
 
     return {
         "final_response": final_text,
