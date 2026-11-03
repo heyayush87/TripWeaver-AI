@@ -8,6 +8,9 @@
 ![FastAPI](https://img.shields.io/badge/API-FastAPI-009688)
 ![Postgres](https://img.shields.io/badge/state-PostgreSQL-336791)
 
+
+🌐 **[Live demo](https://tripweaver-ai.onrender.com/)**
+
 **Try asking:**
 
 - `Plan a 7 day Japan trip from Delhi under 2 lakhs`
