@@ -3,12 +3,12 @@
 import unittest
 from unittest import mock
 
-import anthropic
+import openai
 import httpx
 
 from tripweaver.context import build_context, clip, prepare, trim_search_results
 from tripweaver.limits import (
-    ANTHROPIC,
+    OPENAI,
     AVIATIONSTACK,
     TAVILY,
     ApiLimitError,
@@ -19,10 +19,11 @@ from tripweaver.limits import (
 )
 
 
-def _anthropic_error(cls, status, message):
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+def _openai_error(cls, status, message, code=None):
+    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
     response = httpx.Response(status, request=request)
-    return cls(message, response=response, body=None)
+    body = {"message": message, "code": code} if code else None
+    return cls(message, response=response, body=body)
 
 
 class ClassifyTests(unittest.TestCase):
@@ -46,26 +47,29 @@ class ClassifyTests(unittest.TestCase):
     def test_unrelated_error_is_not_a_limit(self):
         self.assertIsNone(classify_exception(ValueError("bad json"), TAVILY))
 
-    def test_anthropic_rate_limit_error(self):
-        exc = _anthropic_error(anthropic.RateLimitError, 429, "slow down")
+    def test_openai_rate_limit_error(self):
+        exc = _openai_error(openai.RateLimitError, 429, "slow down")
         found = classify_exception(exc)
-        self.assertEqual((found.api, found.kind), (ANTHROPIC, "rate_limit"))
+        self.assertEqual((found.api, found.kind), (OPENAI, "rate_limit"))
 
-    def test_anthropic_empty_credit_balance(self):
-        exc = _anthropic_error(
-            anthropic.BadRequestError, 400, "Your credit balance is too low"
+    def test_openai_insufficient_quota(self):
+        exc = _openai_error(
+            openai.RateLimitError,
+            429,
+            "You exceeded your current quota, please check your plan and billing details.",
+            code="insufficient_quota",
         )
         found = classify_exception(exc)
-        self.assertEqual((found.api, found.kind), (ANTHROPIC, "quota"))
+        self.assertEqual((found.api, found.kind), (OPENAI, "quota"))
 
-    def test_other_anthropic_errors_are_not_limits(self):
-        exc = _anthropic_error(anthropic.BadRequestError, 400, "invalid request")
+    def test_other_openai_errors_are_not_limits(self):
+        exc = _openai_error(openai.BadRequestError, 400, "invalid request")
         self.assertIsNone(classify_exception(exc))
 
     def test_raise_if_limit_raises_only_for_limits(self):
         with self.assertRaises(ApiLimitError):
-            raise_if_limit(RuntimeError("429 too many requests"), ANTHROPIC)
-        raise_if_limit(RuntimeError("something else"), ANTHROPIC)
+            raise_if_limit(RuntimeError("429 too many requests"), OPENAI)
+        raise_if_limit(RuntimeError("something else"), OPENAI)
 
     def test_unique_keeps_one_entry_per_api(self):
         items = [{"api": "A", "message": "1"}, {"api": "A", "message": "2"}]
@@ -94,7 +98,7 @@ class AgentFallbackTests(unittest.TestCase):
         self.assertNotIn("api_limits", out)
 
 
-class ClaudeFailureFallbackTests(unittest.TestCase):
+class LlmFailureFallbackTests(unittest.TestCase):
     def test_budget_failure_gives_a_note_not_a_crash(self):
         from tripweaver.agents.budget import budget_agent
 

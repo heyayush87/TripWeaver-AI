@@ -1,4 +1,4 @@
-"""Token usage tracking for every Claude call.
+"""Token usage tracking for every LLM call.
 
 A callback attached to each model records the input and output tokens of each
 call. Use it to find the largest prompts before trimming context, and to check

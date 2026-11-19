@@ -7,7 +7,7 @@ from tripweaver.agents.state import TravelState
 from tripweaver.context import FINAL_SPEC
 from tripweaver.context import build_context
 from tripweaver.context import prepare
-from tripweaver.limits import ANTHROPIC
+from tripweaver.limits import OPENAI
 from tripweaver.limits import raise_if_limit
 from tripweaver.llm import final_llm
 from tripweaver.streaming import get_emitter
@@ -68,7 +68,7 @@ Important:
                 pieces.append(piece)
                 emit({"type": "final_delta", "text": piece})
     except Exception as exc:
-        raise_if_limit(exc, ANTHROPIC)
+        raise_if_limit(exc, OPENAI)
         pieces = []
 
     final_text = "".join(pieces)

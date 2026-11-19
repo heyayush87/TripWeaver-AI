@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from tripweaver.api.schemas import ApprovalRequest, TravelRequest
-from tripweaver.limits import ANTHROPIC, classify_exception
+from tripweaver.limits import OPENAI, classify_exception
 from tripweaver.service import (
     resume_travel_agent,
     run_travel_agent,
@@ -26,7 +26,7 @@ router = APIRouter()
 
 def _limit_or_error(exc: Exception) -> JSONResponse:
     """429 with the API name when a quota or rate limit was hit, else 500."""
-    limit = classify_exception(exc, ANTHROPIC)
+    limit = classify_exception(exc, OPENAI)
 
     if limit:
         return JSONResponse(

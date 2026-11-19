@@ -4,7 +4,7 @@ Usage:
     uv run python scripts/run_evals.py            # offline + LLM evals
     uv run python scripts/run_evals.py --offline  # no API calls
 
-LLM evals call the supervisor (Claude Haiku) twice per query: once for the
+LLM evals call the supervisor (OpenAI fast model) twice per query: once for the
 guardrail and once for routing and constraint extraction.
 """
 

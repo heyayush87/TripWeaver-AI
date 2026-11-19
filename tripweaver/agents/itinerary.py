@@ -18,7 +18,7 @@ from tripweaver.context import BLOCK_SPEC
 from tripweaver.context import OUTLINE_SPEC
 from tripweaver.context import build_context
 from tripweaver.context import prepare
-from tripweaver.limits import ANTHROPIC
+from tripweaver.limits import OPENAI
 from tripweaver.limits import raise_if_limit
 from tripweaver.llm import fast_llm
 from tripweaver.llm import llm
@@ -152,7 +152,7 @@ def itinerary_agent(state: TravelState):
         try:
             itinerary, calls = _parallel_draft(state, days, emit)
         except Exception as exc:
-            raise_if_limit(exc, ANTHROPIC)
+            raise_if_limit(exc, OPENAI)
             print(f"Parallel itinerary failed, using one call: {exc}")
             itinerary, calls = _single_call(state, emit), 1
     else:

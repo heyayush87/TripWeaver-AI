@@ -6,7 +6,7 @@ from langchain_core.messages import SystemMessage
 from typing import Any
 from tripweaver.agents.state import TravelState
 from tripweaver.llm import fast_llm
-from tripweaver.limits import ANTHROPIC
+from tripweaver.limits import OPENAI
 from tripweaver.limits import AVIATIONSTACK
 from tripweaver.limits import classify_text
 from tripweaver.limits import limit_update
@@ -140,7 +140,7 @@ def flight_agent(state: TravelState):
         )
         flight_data = content_text(response.content)
     except Exception as exc:
-        raise_if_limit(exc, ANTHROPIC)  # a Claude limit stops the whole request
+        raise_if_limit(exc, OPENAI)  # an OpenAI limit stops the whole request
         flight_data = f"Flight guidance unavailable: {exc}"
 
     return {

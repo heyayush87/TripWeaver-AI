@@ -2,7 +2,7 @@
 
 Two kinds of failure are handled differently:
 
-* The language model (Anthropic) is needed for every plan. If its limit is hit
+* The language model (OpenAI) is needed for every plan. If its limit is hit
   the request stops and the page shows a "Token limit exceeded" popup that
   names the API.
 * Search, flight and weather APIs only add data. If one of them hits its limit
@@ -12,7 +12,7 @@ Two kinds of failure are handled differently:
 
 from typing import Any
 
-ANTHROPIC = "Anthropic (Claude)"
+OPENAI = "OpenAI"
 TAVILY = "Tavily (hotel search)"
 AVIATIONSTACK = "AviationStack (flights)"
 OPENWEATHER = "OpenWeather (weather)"
@@ -32,6 +32,8 @@ LIMIT_PHRASES = (
     "maximum calls",
     "credit balance",
     "exceeded your",
+    "insufficient_quota",
+    "billing",
 )
 
 
@@ -71,25 +73,30 @@ def classify_text(api: str, text: str) -> ApiLimitError | None:
 def classify_exception(exc: BaseException, api: str | None = None) -> ApiLimitError | None:
     """Return an ApiLimitError for a limit failure, otherwise None.
 
-    Anthropic errors are recognised by their type. For other APIs pass `api`
+    OpenAI errors are recognised by their type. For other APIs pass `api`
     and the message text is checked.
     """
     if isinstance(exc, ApiLimitError):
         return exc
 
     try:
-        import anthropic
+        import openai
     except ImportError:  # pragma: no cover
-        anthropic = None
+        openai = None
 
-    if anthropic is not None:
-        if isinstance(exc, anthropic.RateLimitError):
-            return ApiLimitError(ANTHROPIC, "rate_limit")
+    if openai is not None:
+        if isinstance(exc, openai.RateLimitError):
+            # OpenAI answers 429 both for "too fast" and for an exhausted
+            # quota; the error code tells them apart.
+            text = f"{getattr(exc, 'code', '') or ''} {exc}".lower()
+            if "insufficient_quota" in text or "quota" in text or "billing" in text:
+                return ApiLimitError(OPENAI, "quota")
+            return ApiLimitError(OPENAI, "rate_limit")
 
-        if isinstance(exc, anthropic.APIStatusError):
-            found = classify_text(ANTHROPIC, str(exc))
+        if isinstance(exc, openai.APIStatusError):
+            found = classify_text(OPENAI, str(exc))
             if found and getattr(exc, "status_code", 0) in (400, 402, 403, 429):
-                return ApiLimitError(ANTHROPIC, found.kind)
+                return ApiLimitError(OPENAI, found.kind)
 
     if api:
         return classify_text(api, str(exc))

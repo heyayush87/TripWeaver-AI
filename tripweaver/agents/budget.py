@@ -7,7 +7,7 @@ from tripweaver.agents.state import TravelState
 from tripweaver.context import BUDGET_SPEC
 from tripweaver.context import build_context
 from tripweaver.context import prepare
-from tripweaver.limits import ANTHROPIC
+from tripweaver.limits import OPENAI
 from tripweaver.limits import raise_if_limit
 from tripweaver.llm import fast_llm
 from tripweaver.utils import content_text
@@ -38,7 +38,7 @@ If exact live prices are unavailable, clearly label estimates as approximate.
         budget_text = content_text(response.content)
     except Exception as exc:
         # A quota problem stops the run; any other failure only costs the budget notes.
-        raise_if_limit(exc, ANTHROPIC)
+        raise_if_limit(exc, OPENAI)
         budget_text = (
             "A budget estimate could not be generated right now. "
             "Check current prices for flights, hotels and daily costs before booking."

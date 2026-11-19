@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.12-blue)
 ![LangGraph](https://img.shields.io/badge/LangGraph-multi--agent-green)
-![Claude](https://img.shields.io/badge/LLM-Claude-orange)
+![OpenAI](https://img.shields.io/badge/LLM-OpenAI-412991)
 ![FastAPI](https://img.shields.io/badge/API-FastAPI-009688)
 ![Postgres](https://img.shields.io/badge/state-PostgreSQL-336791)
 
@@ -33,8 +33,8 @@
 | ✅ **Human-in-the-loop** | Approve the draft, or request changes with feedback |
 | 💾 **Persistent chats** | LangGraph checkpoints stored in PostgreSQL, one `thread_id` per chat |
 | 📡 **Streaming** | The flight table, the itinerary (block by block) and the final plan appear while they are written (Server-Sent Events) |
-| 🛟 **Graceful fallbacks** | Every external step degrades instead of failing the request: hotels, weather and flights fall back to general suggestions, budget to a short note, the final answer to the approved draft, and parallel itinerary drafting to a single call. Claude calls retry up to 4 times on overload or timeouts |
-| 🚦 **Limit fallback** | If an API runs out of quota the page shows a "Token limit exceeded" popup naming the API. Claude limits stop the request; search, flight and weather limits still give a plan with general suggestions |
+| 🛟 **Graceful fallbacks** | Every external step degrades instead of failing the request: hotels, weather and flights fall back to general suggestions, budget to a short note, the final answer to the approved draft, and parallel itinerary drafting to a single call. OpenAI calls retry up to 4 times on overload or timeouts |
+| 🚦 **Limit fallback** | If an API runs out of quota the page shows a "Token limit exceeded" popup naming the API. OpenAI limits stop the request; search, flight and weather limits still give a plan with general suggestions |
 | ✂️ **Context stripping** | Each model call receives only the data it needs (top hotel results, no URLs, per-step length limits), about half the prompt tokens |
 | 📄 **Export** | Copy the plan or download it as a PDF |
 
@@ -61,9 +61,9 @@ flowchart LR
     FN --> R([Response])
 ```
 
-1. The **supervisor** (Claude Haiku) checks that the request is about travel and, at the same time, extracts origin, destination, duration and budget and chooses the agents.
+1. The **supervisor** (`gpt-5-mini`) checks that the request is about travel and, at the same time, extracts origin, destination, duration and budget and chooses the agents.
 2. **Flight, hotel and weather** agents run in parallel (LangGraph fan-out).
-3. The **budget** agent and the **itinerary** agent run in parallel. For trips longer than 4 days the itinerary is written map-reduce style: a quick outline, then blocks of days written at the same time by Claude Sonnet and joined.
+3. The **budget** agent and the **itinerary** agent run in parallel. For trips longer than 4 days the itinerary is written map-reduce style: a quick outline, then blocks of days written at the same time by `gpt-5` and joined.
 4. The graph **pauses** at `interrupt()` so you can approve the draft or send feedback.
 5. The **final** agent produces the formatted plan.
 
@@ -72,9 +72,9 @@ flowchart LR
 
 | Step | Model | Why |
 |---|---|---|
-| Guardrail, supervisor, flight guidance, budget | `claude-haiku-5-5` | Short outputs, speed matters |
-| Itinerary draft | `claude-sonnet-5-5` | Longest, most creative step |
-| Final formatting | `claude-haiku-5-5` | Reformats an approved draft |
+| Guardrail, supervisor, flight guidance, budget | `gpt-5-mini` (`OPENAI_FAST_MODEL`) | Short outputs, speed matters |
+| Itinerary draft | `gpt-5` (`OPENAI_MODEL`) | Longest, most creative step |
+| Final formatting | `gpt-5-mini` (`OPENAI_FAST_MODEL`) | Reformats an approved draft |
 
 </details>
 
@@ -98,7 +98,11 @@ Open <http://localhost:8000>.
 <summary><b>.env settings</b></summary>
 
 ```
-ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+# Optional overrides
+# OPENAI_MODEL=gpt-5
+# OPENAI_FAST_MODEL=gpt-5-mini
+# OPENAI_FAST_REASONING_EFFORT=minimal   # leave empty for non-reasoning models
 TAVILY_API_KEY=
 AVIATION_API_KEY=
 OPENWEATHER_API_KEY=
@@ -146,7 +150,7 @@ The project has three layers of checks. Run them yourself:
 ```bash
 uv run python -m unittest discover -s tests -t .   # unit tests, offline
 uv run python scripts/run_evals.py --offline        # route resolution, no API calls
-uv run python scripts/run_evals.py                  # full suite, ~60 Haiku calls
+uv run python scripts/run_evals.py                  # full suite, ~60 fast-model calls
 ```
 
 The test set lives in [`evals/dataset.json`](evals/dataset.json) and the latest run is saved to `evals/latest_results.json`.
@@ -237,7 +241,7 @@ Not changed on purpose: the weather MCP server (about 6 s cold, not on the criti
 app.py                       Local dev launcher
 tripweaver/
   config.py                  .env loading, SSL certs, database URL
-  llm.py                     Claude model instances (Sonnet + Haiku)
+  llm.py                     OpenAI model instances (main + fast)
   utils.py                   Cache, async runner, JSON/text helpers
   db.py                      Postgres pool + LangGraph checkpointer
   service.py                 run_travel_agent / resume_travel_agent

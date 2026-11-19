@@ -8,11 +8,11 @@ from typing import Any
 
 import certifi
 from dotenv import load_dotenv
-from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 # CHANGED: added the missing imports above (asyncio, shutil, sys, Path, Any,
-# ChatAnthropic) and removed the stray `from tkinter import NONE`.
+# ChatOpenAI) and removed the stray `from tkinter import NONE`.
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(BASE_DIR / ".env")
@@ -40,11 +40,11 @@ WEATHER_SERVER_PATH = (
 UVX_COMMAND = shutil.which("uvx") or "uvx"
 
 # =========================================================
-# Claude LLM
+# OpenAI LLM
 # =========================================================
 
-# CHANGED: added the Claude model (reads ANTHROPIC_API_KEY from .env).
-llm = ChatAnthropic(model="claude-sonnet-5-5")
+# Reads OPENAI_API_KEY (and optional OPENAI_MODEL) from .env.
+llm = ChatOpenAI(model=os.getenv("OPENAI_MODEL", "gpt-5"))
 
 
 def _require_env(name: str, value: str | None) -> None:
@@ -228,7 +228,7 @@ def parse_tavily_result(raw: Any, max_chars: int = 300) -> str:
     CHANGED: added. The MCP tool returns a list of content blocks, e.g.
     [{'type': 'text', 'text': '{"query": ..., "results": [...]}'}],
     where `text` is a JSON string. This turns it into clean numbered text
-    (title, url, short snippet) that can be passed to Claude.
+    (title, url, short snippet) that can be passed to the model.
     """
 
     if isinstance(raw, str):
@@ -344,7 +344,7 @@ Do not add any explanation.
 
     response = llm.invoke(prompt)
 
-    # CHANGED: `.text` instead of `str(response.content)`, because Claude can
+    # CHANGED: `.text` instead of `str(response.content)`, because the model can
     # return a list of blocks, not a plain string.
     destination = response.text.strip()
 

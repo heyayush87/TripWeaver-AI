@@ -8,7 +8,7 @@ from collections.abc import Iterator
 from typing import Any
 from tripweaver.agents.graph import travel_graph
 from tripweaver.agents.state import empty_constraints
-from tripweaver.limits import ANTHROPIC
+from tripweaver.limits import OPENAI
 from tripweaver.limits import classify_exception
 from tripweaver.limits import unique
 from tripweaver.utils import content_text
@@ -155,7 +155,7 @@ def _stream_graph(graph_input: Any, thread_id: str) -> Iterator[dict[str, Any]]:
 
     except Exception as exc:
         traceback.print_exc()
-        limit = classify_exception(exc, ANTHROPIC)
+        limit = classify_exception(exc, OPENAI)
 
         if limit:
             yield {
